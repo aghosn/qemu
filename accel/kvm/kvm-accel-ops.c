@@ -26,10 +26,17 @@
 #include <linux/kvm.h>
 #include "kvm-cpus.h"
 
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 static void *kvm_vcpu_thread_fn(void *arg)
 {
     CPUState *cpu = arg;
     int r;
+    cpu_set_t cpuset;
+    char *pin_env;
 
     rcu_register_thread();
 
@@ -37,6 +44,21 @@ static void *kvm_vcpu_thread_fn(void *arg)
     qemu_thread_get_self(cpu->thread);
     cpu->thread_id = qemu_get_thread_id();
     current_cpu = cpu;
+
+    // Set the CPU affinity
+    pin_env = getenv("KVM_PIN_CORES");
+    if (pin_env != NULL) {
+        unsigned long core = strtoul(pin_env, NULL, 10);
+        core += cpu->cpu_index;
+
+        CPU_ZERO(&cpuset);
+        CPU_SET(core, &cpuset);
+        if (pthread_setaffinity_np(cpu->thread->thread, sizeof(cpuset), &cpuset) != 0) {
+            perror("Failled to set thread affinity with pthread_setaffinity_np\n");
+        } else {
+            printf("Pinned vCPU %d to CPU %lu\n", cpu->cpu_index, core);
+        }
+    }
 
     r = kvm_init_vcpu(cpu, &error_fatal);
     kvm_init_cpu_signals(cpu);
