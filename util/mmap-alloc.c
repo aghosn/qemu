@@ -192,6 +192,7 @@ static void *mmap_activate(void *ptr, size_t size, int fd,
     int map_sync_flags = 0;
     int flags = MAP_FIXED;
     void *activated_ptr;
+    static int contalloc = 0;
 
     if (noreserve && !map_noreserve_effective(fd, qemu_map_flags)) {
         return MAP_FAILED;
@@ -204,8 +205,22 @@ static void *mmap_activate(void *ptr, size_t size, int fd,
         map_sync_flags = MAP_SYNC | MAP_SHARED_VALIDATE;
     }
 
-    activated_ptr = mmap(ptr, size, prot, flags | map_sync_flags, fd,
+    printf("Activating at 0x%p for size %ld, fd is %d, offset 0x%lx, readonly? %d\n",
+            ptr, size, fd, map_offset, readonly);
+    if (contalloc == 0 && !readonly) {
+        contalloc = open("/dev/contalloc", O_RDWR);
+        if (contalloc < 0) {
+            printf("Error: could not open contalloc\n");
+             activated_ptr = mmap(ptr, size, prot, flags | map_sync_flags, fd,
                          map_offset);
+        } else {
+            printf("WE CONTALLOC\n");
+           activated_ptr = mmap(ptr, size, prot, MAP_SHARED | MAP_POPULATE, contalloc, map_offset);
+        }
+    } else {
+        activated_ptr = mmap(ptr, size, prot, flags | map_sync_flags, fd,
+                         map_offset);
+    }
     if (activated_ptr == MAP_FAILED && map_sync_flags) {
         if (errno == ENOTSUP) {
             char *proc_link = g_strdup_printf("/proc/self/fd/%d", fd);
@@ -259,6 +274,8 @@ void *qemu_ram_mmap(int fd,
      * space, even if size is already aligned.
      */
     total = size + align;
+
+    printf("Here is the total size we mmap %ld\n", total);
 
     guardptr = mmap_reserve(total, fd);
     if (guardptr == MAP_FAILED) {

@@ -52,6 +52,8 @@
 #include "hw/boards.h"
 #include "sysemu/stats.h"
 
+#include "common_kvm.h"
+
 /* This check must be after config-host.h is included */
 #ifdef CONFIG_EVENTFD
 #include <sys/eventfd.h>
@@ -363,19 +365,33 @@ static int kvm_set_user_memory_region(KVMMemoryListener *kml, KVMSlot *slot, boo
          * value. This is needed based on KVM commit 75d61fbc. */
         mem.memory_size = 0;
 
+        printf("1. Guest memory region start %llx, size %llx, phys %llx\n",
+                mem.userspace_addr, mem.memory_size, mem.guest_phys_addr);
         if (kvm_guest_memfd_supported) {
+            printf("setting REGION2\n");
             ret = kvm_vm_ioctl(s, KVM_SET_USER_MEMORY_REGION2, &mem);
         } else {
+            printf("setting REGION\n");
             ret = kvm_vm_ioctl(s, KVM_SET_USER_MEMORY_REGION, &mem);
         }
         if (ret < 0) {
             goto err;
         }
     }
+
+    if (getenv("CONFIDENTIAL_VM") && !(mem.flags & KVM_MEM_READONLY)) {
+        mem.flags |= KVM_FLAGS_ENCODING_PRESENT | (CONFIDENTIALIZABLE << KVM_FLAGS_SEGMENT_TYPE_IDX);
+        mem.flags |= ((MEM_READ | MEM_EXEC | MEM_WRITE | MEM_SUPER | MEM_ACTIVE)
+            << KVM_FLAGS_MEM_ACCESS_RIGHTS_IDX);
+    }
     mem.memory_size = slot->memory_size;
     if (kvm_guest_memfd_supported) {
+        printf("2. Guest memory region start %llx, size %llx, phys %llx\n",
+                mem.userspace_addr, mem.memory_size, mem.guest_phys_addr);
         ret = kvm_vm_ioctl(s, KVM_SET_USER_MEMORY_REGION2, &mem);
     } else {
+        printf("3. Guest memory region start %llx, size %llx, phys %llx\n",
+                mem.userspace_addr, mem.memory_size, mem.guest_phys_addr);
         ret = kvm_vm_ioctl(s, KVM_SET_USER_MEMORY_REGION, &mem);
     }
     slot->old_flags = mem.flags;
